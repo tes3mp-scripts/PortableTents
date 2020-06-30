@@ -1,0 +1,2 @@
+This script is written for [my current CoreScripts](https://github.com/uramer/CoreScripts/tree/0.7.1-async) and latest [master of tes3mp](https://github.com/TES3MP/openmw-tes3mp).
+It does not work in 0.7-alpha
