@@ -105,6 +105,9 @@ local tentStorage = storage.Load("urm_portable_tents", {
     ]],
     players = {} --[[
         accountName = { refId }
+    ]],
+    weights = {} --[[
+        refId = weight
     ]]
 })
 
@@ -430,16 +433,40 @@ local function placeTent(pid, exteriorDescription, uniqueIndex)
     return true
 end
 
+local function itemWeight(refId)
+    if tentStorage.weights[refId] then
+        return tentStorage.weights[refId]
+    end
+    local recordStore = logicHandler.GetRecordStoreByRecordId(refId)
+    if recordStore then
+        local record
+        if logicHandler.IsGeneratedRecord(refId) then
+            record = recordStore.data.generatedRecords[refId]
+        else
+            record = recordStore.data.permanentRecords[refId]
+        end
+        if record then
+            if record.weight then
+                return record.weight
+            end
+            if record.baseId then
+                return itemWeight(record.baseId)
+            end
+        end
+    end
+    return 0
+end
+
 local function calculateExtraWeight(interiorDescription)
     local weight = 0
     local objectData = LoadedCells[interiorDescription].data.objectData
     for uniqueIndex, object in pairs(objectData) do
-        --TODO: get items' weight when ESP reading is implemented
-        weight = weight + ( object.count or 1 )
         if object.inventory then
             for _, item in pairs(object.inventory) do
-                weight = weight + ( item.count or 1 )
+                weight = weight + ( item.count or 1 ) * itemWeight(item.refId)
             end
+        else
+            weight = weight + ( object.count or 1 ) * itemWeight(object.refId)
         end
     end
     return weight
@@ -560,6 +587,36 @@ customEventHooks.registerHandler("OnObjectDelete", function(eventStatus, pid, ce
     for uniqueIndex, object in pairs(objects) do
         if getTentRecord(object.refId) then
             pickupTent(pid, cellDescription, uniqueIndex)
+        end
+    end
+end)
+
+customEventHooks.registerHandler("espParser_Start", function(_, files)
+    tentStorage.weights = {}
+end)
+
+local statSubRecords = {
+    MISC = "MCDT",
+    WEAP = "WPDT",
+    LIGH = "LHDT",
+    ARMO = "AODT",
+    CLOT = "CTDT",
+    REPA = "RTDT",
+    APPA = "AADT",
+    LOCK = "LKDT",
+    PROB = "PBDT",
+    INGR = "IRDT",
+    BOOK = "BKDT",
+    ALCH = "ALDT"
+}
+customEventHooks.registerHandler("espParser_Record", function(_, record)
+    if statSubRecords[record.name] then
+        local statSubRecord = record.subRecords[statSubRecords[record.name]]
+        if statSubRecord then
+            local refId = record.subRecords.NAME
+            local weight = record.subRecords[statSubRecords[record.name]].Weight
+            weight = tonumber(weight) or 0
+            tentStorage.weights[refId] = tonumber(weight) or 0
         end
     end
 end)
