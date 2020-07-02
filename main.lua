@@ -1,14 +1,98 @@
-local configuration = jsonConfig.Load("urm_portable_tents", {
+local configuration = jsonConfig.Load("portable_tents", {
     limit = 0,
+    allowInsideTents = true,
+    allowInsideInteriors = false,
     localization = {
+        AlreadyPlaced = "You have already placed this tent!",
         InputName = "Input a unique name for your tent:",
         UniqueName = "You've already used that name!",
-        LimitExceeded = "You already have the maximum amount of tents!"
+        LimitExceeded = "You already have the maximum amount of tents!",
+        InsideTentInterior = "You can't place a tent inside another tent!",
+        InsideInterior = "You can't place tents inside interiors!"
     },
     tents = {
+        tent_ashl_01 = {
+            teleportToExit = true,
+            cellName = "Tent",
+            item = {
+                collision = true,
+                offset = {
+                    posX = 0,
+                    posY = 0,
+                    posZ = -120,
+                    rotX = 0,
+                    rotY = 0,
+                    rotZ = 0
+                },
+                inventory = {
+                    model = "x\\Ex_Ashl_Tent_01.NIF",
+                    icon = "n\\ingred_6th_corpusmeat_05.dds",
+                    weight = 25,
+                    name = "Large Ashlander tent",
+                    value = 1000
+                }
+            },
+            doors = {
+                entrance = {
+                    refId = "ex_ashl_door_01",
+                    location = {
+                        posX = 0,
+                        posY = 0,
+                        posZ = 0,
+                        rotX = 0,
+                        rotY = 0,
+                        rotZ = 0
+                    },
+                    doorDestination = {
+                        teleport = true,
+                        posX = 0,
+                        posY = -160,
+                        posZ = 0,
+                        rotX = -120,
+                        rotY = 0,
+                        rotZ = 0
+                    }
+                },
+                exit = {
+                    refId = "in_ashl_door_01",
+                    location = {
+                        posX = 0,
+                        posY = 0,
+                        posZ = 0,
+                        rotX = 0,
+                        rotY = 0,
+                        rotZ = 0
+                    },
+                    doorDestination = {
+                        teleport = true,
+                        posX = 0,
+                        posY = -400,
+                        posZ = 0,
+                        rotX = 0,
+                        rotY = 0,
+                        rotZ = 0
+                    }
+                }
+            },
+            interior = {
+                place = {
+                    {
+                        refId = "in_ashl_tent_01",
+                        location = {
+                            posX = 0,
+                            posY = 0,
+                            posZ = 0,
+                            rotX = 0,
+                            rotY = 0,
+                            rotZ = 0
+                        },
+                    },
+                }
+            }
+        },
         tent_ashl_02 = {
             teleportToExit = true,
-            cellName = "Ashlander Tent",
+            cellName = "Tent",
             item = {
                 collision = true,
                 offset = {
@@ -21,8 +105,8 @@ local configuration = jsonConfig.Load("urm_portable_tents", {
                 },
                 inventory = {
                     model = "x\\Ex_Ashl_Tent_02.NIF",
-                    icon = "a\\tx_fur_colovian_helm.dds",
-                    weight = 1,
+                    icon = "n\\ingred_6th_corpusmeat_06.dds",
+                    weight = 15,
                     name = "Ashlander tent",
                     value = 500
                 }
@@ -42,7 +126,7 @@ local configuration = jsonConfig.Load("urm_portable_tents", {
                         teleport = true,
                         posX = 0,
                         posY = 0,
-                        posZ = -130,
+                        posZ = 0,
                         rotX = 0,
                         rotY = 0,
                         rotZ = 0
@@ -108,7 +192,11 @@ local tentStorage = storage.Load("urm_portable_tents", {
     ]],
     weights = {} --[[
         refId = weight
-    ]]
+    ]],
+    interiors = {} --[[
+        cellDescription = refId
+    ]],
+
 })
 
 --
@@ -269,6 +357,10 @@ end
 -- core logic
 --
 
+local function isTentInterior(cellDescription)
+    return tentStorage.interiors[cellDescription] ~= nil
+end
+
 local function reachedLimit(pid, attemptedRefId)
     if configuration.limit < 1 then return false end
     local playerTents = getPlayerTents(Players[pid].accountName)
@@ -371,6 +463,7 @@ local function createInteriorCell(pid, refId)
         end
     end
     tentRecord.interiorDescription = interiorDescription
+    tentStorage.interiors[interiorDescription] = refId
     return true
 end
 
@@ -412,7 +505,7 @@ local function placeTent(pid, exteriorDescription, uniqueIndex)
         return false, configuration.localization.AlreadyPlaced
     end
     if reachedLimit(pid, refId) then
-        return false, configuration.localization.ReachedLimit
+        return false, configuration.localization.LimitExceeded
     end
 
     local tent = configuration.tents[tentRecord.baseId]
@@ -511,31 +604,39 @@ end)
 
 customEventHooks.registerValidator("OnObjectPlace", function(eventStatus, pid, cellDescription, objects)
     if not eventStatus.validCustomHandlers then return end
+    tableHelper.print(objects)
     for uniqueIndex, object in pairs(objects) do
         local tentRecord = getTentRecord(object.refId)
         local tentConfig = configuration.tents[object.refId]
-        if tentConfig then -- using this tent for the first time
-            if reachedLimit(pid) then
+        if tentRecord or tentConfig then
+            local cancel = false
+            if configuration.allowInsideTents and isTentInterior(cellDescription) then
+                guiHelper.MessageBox(pid, configuration.localization.InsideTentInterior)
+                cancel = true
+            elseif not configuration.allowInsideInteriors and not LoadedCells[cellDescription].isExterior then
+                guiHelper.MessageBox(pid, configuration.localization.InsideInterior)
+                cancel = true
+            elseif reachedLimit(pid) then
                 guiHelper.MessageBox(pid, configuration.localization.LimitExceeded)
+                cancel = true
+            elseif tentConfig then -- using this tent for the first time
+                object.location = sumLocations(
+                    object.location,
+                    tentConfig.item.offset
+                )
+            elseif tentRecord then -- placing a tent that was used before
+                object.location = sumLocations(
+                    object.location,
+                    getTentConfiguration(object.refId).item.offset
+                )
+            end
+            if cancel then
                 givePlayerItems(pid, {{
                     refId = object.refId,
                     count = object.count
                 }})
                 return customEventHooks.makeEventStatus(false, false)
-            end
-            object.location = sumLocations(
-                object.location,
-                tentConfig.item.offset
-            )
-        end
-        if tentRecord then -- placing a tent that was used before
-            object.location = sumLocations(
-                object.location,
-                getTentConfiguration(object.refId).item.offset
-            )
-        end
-        if tentRecord or tentConfig then -- ef it's a tent, make sure there is only 1 item
-            if object.count > 1 then
+            elseif object.count > 1 then -- make sure there is only 1 tent
                 givePlayerItems(pid, {{
                     refId = object.refId,
                     count = object.count - 1
@@ -554,7 +655,7 @@ customEventHooks.registerHandler("OnObjectPlace", function(eventStatus, pid, cel
         if tentRecord then -- placing a tent that was used before
             local status, err = placeTent(pid, cellDescription, uniqueIndex)
             if not status then
-                guiHelper.MessageBox(err)
+                guiHelper.MessageBox(pid, tostring(err))
                 givePlayerItems(pid, {{
                     refId = object.refId,
                     count = object.count or 1
@@ -570,7 +671,7 @@ customEventHooks.registerHandler("OnObjectPlace", function(eventStatus, pid, cel
                 local tentUniqueIndex = replaceTentObject(cellDescription, uniqueIndex, refId)
                 local status, err = placeTent(pid, cellDescription, tentUniqueIndex)
                 if not status then -- should not happen under normal conditions
-                    guiHelper.MessageBox(err)
+                    guiHelper.MessageBox(pid, tostring(err))
                     givePlayerItems(pid, {{
                         refId = object.refId,
                         count = object.count or 1
@@ -585,7 +686,7 @@ end)
 customEventHooks.registerHandler("OnObjectDelete", function(eventStatus, pid, cellDescription, objects)
     if not eventStatus.validCustomHandlers then return end
     for uniqueIndex, object in pairs(objects) do
-        if getTentRecord(object.refId) then
+        if getTentObject(uniqueIndex) then
             pickupTent(pid, cellDescription, uniqueIndex)
         end
     end
